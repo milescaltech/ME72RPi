@@ -1,85 +1,81 @@
+'''
+Class and functions for camera shit.
+
+'''
+
+from picamera2 import Picamera2
+import libcamera
 import cv2
 import numpy as np
-import picamera2
-import time
-from circle_detection_test import take_pic, convert_pic
 
-name = "testpic"
 
-def capture_image():
-    with picamera2.Picamera2() as camera:
-        # Set camera resolution
-        camera.resolution = (640, 480)
+def convert_img(im_name):
+    '''
+    Converts a JPEG image file (exclude the .jpg extenion!) to the three
+    formats (1) RGB, (2) GREY, (3) HSV.
+    '''
+    # Open the JPEGMAFIA
+    img = cv2.imread(im_name + ".jpg")
+    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    img_grey = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    img_hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    return (img_rgb, img_grey, img_hsv)
 
-        # Allow time for the camera to warm up
-        time.sleep(2)
+def find_circ(im_name, lc=np.array([100,100,100]), uc=np.array([140,255,255])):
+    '''
+    Returns a list of detected circles using an OpenCV algorithm.
 
-        capture_config = camera.create_still_configuration()
+    Parameters
+    ----------
+    im_name: name of the JPEG image file, excluding the extension
+    lc: lower colors for HSV thresholding
+    uc: upper colors for HSV thresholding
+    '''
+    # Get the three image pixel formats for the provided JPEG
+    (img_rgb, img_grey, img_hsv) = convert_img(im_name)
 
-#         yuv420 = camera.capture_array()
-#         rgb =cv2.cvtColor(yuv420, cv2.COLOR_YUV420p2RGB)
-#         return rgb
-        print('capturing array...')
-        array = camera.capture_array("main")
-        print('finished capturing array')
-        return array
+    # Apply HSV thresholding
+    masked = cv2.inRange(img_hsv, lc, uc)
 
-#         # Capture image to a NumPy array
-#         with picamera2.array.PiRGBArray(camera) as output:
-#             camera.capture(output, format='bgr')
-#             return output.array
+    # Apply Gaussian blur to reduce noise and help with detection
+    blurred = cv2.GaussianBlur(masked, (5,5), 0)
 
-def main():
-    while True:
-        # Capture an image from the Pi Camera
-        take_pic(name)
-        (img_rgb, img_grey) = convert_pic(name)
-        # frame = capture_image()
-        
-        # ranges for HSV
-        lower_color = np.array([100, 100, 100])
-        upper_color = np.array([140,255,255])
-        
-        # Convert the frame to grayscale
-        # gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        # gray = img_grey
-        hsv = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2HSV)
-        hsv = cv2.inRange(hsv, lower_color, upper_color)
-        # Get the V component
-        # gray = hsv[:][:][2]
+    # Identify the detected circles using OpenCV
+    circles = cv2.HoughCircles(blurred, cv2.HOUGH_GRADIENT, dp=1,
+                               minDist=20, param1 = 50, param2=30,
+                               minRadius=20, maxRadius=120)
+    return circles
 
-        # Apply GaussianBlur to reduce noise and help with detection
-        blurred = cv2.GaussianBlur(hsv, (5, 5), 0)
 
-        # Use HoughCircles to detect circles in the image
-        circles = cv2.HoughCircles(
-            blurred,
-            cv2.HOUGH_GRADIENT,
-            dp=1,
-            minDist=20,
-            param1=50,
-            param2=30,
-            minRadius=20,
-            maxRadius=120
-        )
-        print(circles)
-        # If circles are found, draw them on the frame
-        if circles is not None:
-            circles = np.uint16(np.around(circles))
-            most_prominent_circle = circles[0][0]  # Select the first circle as the most prominent
+class Camera:
+    def __init__(self):
+        # Create the camera object
+        print("Setting up your beautiful camera...")
+        self.camera = Picamera2()
+        print("Camera created!")
 
-            # Draw the circle on the frame
-            cv2.circle(img_rgb, (most_prominent_circle[0], most_prominent_circle[1]), most_prominent_circle[2], (0, 255, 0), 2)
+        # Camera resolution
+        self.resolution = (640, 480)
 
-        # Display the frame
-        cv2.imshow("Blob Detection", img_rgb)
+        # Configure the camera (preview config)
+        pc = self.camera.create_preview_configuration()
+        pc["transform"] = libcamera.Transform(vflip=1, hflip=1)
+        self.camera.configure(pc)
+        self.camera.start()
+        print("Camera configured!")
 
-        # Break the loop if 'q' key is pressed
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
+    def capture(self,im_name):
+        '''
+        Captures an image and saves it using the provided name to the local
+        directory.
+        '''
+        # Capture JPEG (try to store this in an array instead for speed!)
+        self.camera.capture_file(im_name + ".jpg")
 
-    # Close OpenCV windows
-    cv2.destroyAllWindows()
+    def get_camera(self):
+        '''
+        Getter method for the camera object.
+        '''
+        return self.camera
 
-if __name__ == "__main__":
-    main()
+
